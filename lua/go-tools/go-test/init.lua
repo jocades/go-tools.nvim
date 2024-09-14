@@ -1,5 +1,6 @@
 local Popup = require("nui.popup")
 local tsu = require("nvim-treesitter.ts_utils")
+local u = require("go-tools.util")
 
 local M = {}
 
@@ -34,8 +35,53 @@ local M = {}
 ---@class go_test.FailEntry : go_test.DoneEntry
 ---@field Action "fail"
 
-function M.hello()
-  vim.notify("hello from go test")
+local go_test_func_query_str = [[
+  ((function_declaration
+    name: (identifier) @_func_name
+    parameters: (parameter_list
+      (parameter_declaration
+        name: (identifier)
+        type: (pointer_type
+          (qualified_type
+            package: (package_identifier) @_pkg_name
+            name: (type_identifier) @_type_name)))))
+    (#eq? @_pkg_name "testing")
+    (#eq? @_type_name "T")
+    (#match? @_func_name "^Test"))
+]]
+
+local function parse_query(buf, query_str)
+  local ft = vim.bo[buf].ft
+  local lang = vim.treesitter.language.get_lang(ft)
+
+  if not lang then
+    u.err("No treesitter parser found for " .. ft)
+    return
+  end
+
+  local root = vim.treesitter.get_parser(buf):parse()[1]:root()
+  local query = vim.treesitter.query.parse(lang, query_str)
+
+  print("===============")
+
+  for i, node in query:iter_captures(root, buf) do
+    local capture = query.captures[i]
+    -- ins(capture)
+    -- ins(getmetatable(capture))
+
+    if capture == "_func_name" then
+      local srow, scol, erow, ecol = node:range()
+      local func_name = vim.treesitter.get_node_text(node, buf)
+
+      vim.print({
+        func_name = func_name,
+        srow = srow,
+        scol = scol,
+        erow = erow,
+        ecol = ecol,
+      })
+    end
+  end
 end
 
 local ns = vim.api.nvim_create_namespace("go-test")
@@ -90,29 +136,27 @@ local function clear(buf)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
 end
 
----@type NuiPopup
-local popup
-
-local function get_test_func_at_cursor()
+---@param buf number
+local function get_test_func_at_cursor(buf)
   local node = tsu.get_node_at_cursor()
+
+  while node do
+    if node:type() == "function_declaration" then
+      node = node:named_child(0)
+      break
+    end
+    node = node:parent()
+  end
+
   if not node then
     return
   end
 
-  if
-    node:type() == "identifier"
-    and node:parent():type() == "function_declaration"
-  then
-    local func = tsu.get_node_text(node)[1]
-    if func:sub(1, 4) == "Test" then
-      -- execute({ "go", "test", "-v", path, "-run", func })
-      return func
-    end
+  local func = vim.treesitter.get_node_text(node, buf)
+  if func:sub(1, 4) == "Test" then
+    return func
   end
 end
-
-local active
-local out_buf
 
 ---@param s table
 ---@param line string
@@ -138,33 +182,28 @@ end
 ---@param buf number
 ---@param cmd string[]
 local function execute(buf, cmd)
-  active = true
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 
   local state = {
     buf = buf,
+    out_buf = nil,
     tests = {},
   }
 
-  local pkg
-  vim.api.nvim_buf_create_user_command(buf, "GoTestOut", function()
-    local func = get_test_func_at_cursor()
-    if not func then
-      JVim.info("No func at cursor", { title = "go-test" })
-      return
+  vim.api.nvim_buf_create_user_command(buf, "GoTestDiag", function()
+    local line = vim.fn.line(".")
+    u.ins(line, true)
+    for _, test in pairs(state.tests) do
+      if test.line == line then
+        if not state.out_buf then
+          state.out_buf = vim.api.nvim_create_buf(false, true)
+          vim.cmd.split()
+          vim.api.nvim_set_current_buf(state.out_buf)
+          vim.api.nvim_win_set_height(0, 12)
+        end
+        vim.api.nvim_buf_set_lines(state.out_buf, 0, -1, false, test.output)
+      end
     end
-
-    local key = make_key({ Package = pkg, Test = func })
-    local test = state.tests[key]
-
-    if not out_buf then
-      out_buf = vim.api.nvim_create_buf(false, true)
-      vim.cmd.split()
-      vim.api.nvim_set_current_buf(out_buf)
-      vim.api.nvim_win_set_height(0, 12)
-    end
-
-    vim.api.nvim_buf_set_lines(out_buf, 0, -1, false, test.output)
   end, {})
 
   vim.fn.jobstart(table.concat(cmd, " "), {
@@ -178,22 +217,11 @@ local function execute(buf, cmd)
         parse_line(state, line)
       end
     end,
-    -- on_stderr = append_data(popup.bufnr),
-    -- on_stderr = append_data(out_buf),
     on_exit = function(_, code)
-      -- if code ~= 0 then
-      --   JVim.error("Something went wrong", { title = "go-test" })
-      --   return
-      -- end
-
       ---@type vim.Diagnostic[]
       local diagnostics = {}
 
       for _, test in pairs(state.tests) do
-        if not pkg then
-          pkg = test.pkg
-        end
-
         if test.success then
           table.insert(diagnostics, {
             lnum = test.line - 1,
@@ -213,13 +241,14 @@ local function execute(buf, cmd)
         end
       end
 
-      -- JVim.print(diagnostics)
+      u.ins(state)
 
       vim.diagnostic.set(ns, buf, diagnostics)
     end,
   })
 end
 
+---@param buf number
 function M.go_test(buf)
   local path = vim.api.nvim_buf_get_name(buf)
   if not is_go_test(path) then
@@ -229,10 +258,15 @@ function M.go_test(buf)
   execute(buf, { "go", "test", "-json", path })
 end
 
-function M.go_test_func(path)
+---@param buf number
+function M.go_test_func(buf)
+  local path = vim.api.nvim_buf_get_name(buf)
   if not is_go_test(path) then
     return
   end
+
+  local func = get_test_func_at_cursor(buf)
+  u.ins(func)
 end
 
 function M.setup()
@@ -241,18 +275,18 @@ function M.setup()
   end, {})
 
   vim.api.nvim_create_user_command("GoTestFunc", function()
-    M.go_test_func(vim.api.nvim_buf_get_name(0))
+    M.go_test_func(vim.api.nvim_get_current_buf())
   end, {})
 end
 
--- M.setup()
+return M
 
-local function append_data(buf, data)
+--[[ local function append_data(buf, data)
   if not data then
     return
   end
   vim.api.nvim_buf_set_lines(buf, -2, -1, false, data)
-end
+end ]]
 
 --[[ vim.api.nvim_create_autocmd('BufWritePost', {
   group = vim.api.nvim_create_augroup('jvim-go-test', { clear = true }),
@@ -260,7 +294,7 @@ end
   callback = execute,
 }) ]]
 
-local function create_popup(title)
+--[[ local function create_popup(title)
   return Popup({
     relative = "editor",
     -- enter = true,
@@ -305,4 +339,4 @@ local function inspect(node)
   vim.print(getmetatable(node))
 end
 
-return M
+return M ]]
