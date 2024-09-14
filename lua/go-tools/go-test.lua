@@ -1,18 +1,47 @@
 local Popup = require("nui.popup")
-local tmux = require("lib.tmux")
 local tsu = require("nvim-treesitter.ts_utils")
 
 local M = {}
 
-local ns = vim.api.nvim_create_namespace("live-tests")
-local group = vim.api.nvim_create_augroup("jvim-automagic", { clear = true })
+---@class go_test.Entry
+---@field Time string
+---@field Action string
+---@field Package string
+---@field Test? string
+---@field Output? string
+---@field Elapsed? number
 
-local function make_key(entry)
-  assert(entry.Package, "Must have Package:" .. vim.inspect(entry))
-  assert(entry.Test, "Must have Test:" .. vim.inspect(entry))
-  return ("%s/%s"):format(entry.Package, entry.Test)
+---@class go_test.StartEntry : go_test.Entry
+---@field Action "start"
+
+---@class go_test.RunEntry : go_test.Entry
+---@field Action "run"
+---@field Test string
+
+---@class go_test.OutputEntry : go_test.Entry
+---@field Action "output"
+---@field Test string
+---@field Output string
+
+---@class go_test.DoneEntry : go_test.OutputEntry
+---@field Action "pass" | "fail"
+---@field Test string
+---@field Elapsed number
+
+---@class go_test.PassEntry : go_test.DoneEntry
+---@field Action "pass"
+
+---@class go_test.FailEntry : go_test.DoneEntry
+---@field Action "fail"
+
+function M.hello()
+  vim.notify("hello from go test")
 end
 
+local ns = vim.api.nvim_create_namespace("go-test")
+local group = vim.api.nvim_create_augroup("go-test", { clear = true })
+
+---@param entry go_test.RunEntry
 local function get_test_line(entry)
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
   for i, line in ipairs(lines) do
@@ -24,6 +53,14 @@ local function get_test_line(entry)
   error("Test not found: " .. entry.Test)
 end
 
+---@param entry go_test.Entry
+local function make_key(entry)
+  assert(entry.Package, "Must have Package:" .. vim.inspect(entry))
+  assert(entry.Test, "Must have Test:" .. vim.inspect(entry))
+  return ("%s/%s"):format(entry.Package, entry.Test)
+end
+
+---@param entry go_test.RunEntry
 local function add_test(s, entry)
   s.tests[make_key(entry)] = {
     pkg = entry.Package,
@@ -33,18 +70,22 @@ local function add_test(s, entry)
   }
 end
 
+---@param entry go_test.OutputEntry
 local function add_output(s, entry)
   table.insert(s.tests[make_key(entry)].output, vim.trim(entry.Output))
 end
 
+---@param entry go_test.DoneEntry
 local function mark_success(s, entry)
   s.tests[make_key(entry)].success = entry.Action == "pass"
 end
 
+---@param path string
 local function is_go_test(path)
   return path:match("_test.go$")
 end
 
+---@param buf number
 local function clear(buf)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
 end
@@ -70,6 +111,11 @@ local function get_test_func_at_cursor()
   end
 end
 
+local active
+local out_buf
+
+---@param s table
+---@param line string
 local function parse_line(s, line)
   if vim.trim(line) == "" then
     return
@@ -88,9 +134,6 @@ local function parse_line(s, line)
     mark_success(s, decoded)
   end
 end
-
-local active
-local out_buf
 
 ---@param buf number
 ---@param cmd string[]
@@ -119,7 +162,6 @@ local function execute(buf, cmd)
       vim.cmd.split()
       vim.api.nvim_set_current_buf(out_buf)
       vim.api.nvim_win_set_height(0, 12)
-      vim.wo.winfixheight = true
     end
 
     vim.api.nvim_buf_set_lines(out_buf, 0, -1, false, test.output)
@@ -153,21 +195,15 @@ local function execute(buf, cmd)
         end
 
         if test.success then
-          -- local text = { "✓" }
           table.insert(diagnostics, {
-            bufnr = buf,
             lnum = test.line - 1,
             col = 0,
             severity = vim.diagnostic.severity.INFO,
             source = "go-test",
             message = "PASS",
           })
-          -- vim.api.nvim_buf_set_extmark(buf, ns, test.line, 0, {
-          --   virt_text = { text },
-          -- })
         else
           table.insert(diagnostics, {
-            bufnr = buf,
             lnum = test.line - 1,
             col = 0,
             severity = vim.diagnostic.severity.ERROR,
@@ -207,20 +243,9 @@ function M.setup()
   vim.api.nvim_create_user_command("GoTestFunc", function()
     M.go_test_func(vim.api.nvim_buf_get_name(0))
   end, {})
-
-  vim.keymap.set("n", "<leader>gtr", vim.cmd.GoTest, { desc = "Go test" })
-  vim.keymap.set("n", "<leader>gtf", vim.cmd.GoTestFunc)
-
-  vim.keymap.set("n", "<leader>gtq", function()
-    popup:unmount()
-  end)
-
-  vim.keymap.set("n", "<leader>gts", function()
-    vim.notify("save")
-  end)
 end
 
-M.setup()
+-- M.setup()
 
 local function append_data(buf, data)
   if not data then
@@ -279,3 +304,5 @@ end
 local function inspect(node)
   vim.print(getmetatable(node))
 end
+
+return M
