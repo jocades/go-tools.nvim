@@ -20,4 +20,18 @@ function M.dbg(what, noti)
   end
 end
 
+function M.title(s, dbg)
+  local title = ("==== %s ===="):format(s)
+  if dbg then
+    M.dbg(title)
+  else
+    vim.print(title)
+  end
+end
+
+---@param path string
+function M.is_go_test(path)
+  return path:match("_test.go$")
+end
+
 return M

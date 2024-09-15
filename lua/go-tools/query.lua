@@ -3,7 +3,7 @@ local u = require("go-tools.util")
 
 local M = {}
 
-local go_test_func_query_str = [[
+M.go_test_func_query_str = [[
   ((function_declaration
     name: (identifier) @_func_name
     parameters: (parameter_list
@@ -15,8 +15,10 @@ local go_test_func_query_str = [[
             name: (type_identifier) @_type_name)))))
     (#eq? @_pkg_name "testing")
     (#eq? @_type_name "T")
-    (#eq? @_func_name "%s"))
+    (%s))
 ]]
+
+-- (#eq? @_func_name "%s"))
 
 ---@param buf number
 ---@param query_str string
@@ -38,24 +40,36 @@ end
 ---@param buf number
 ---@param query_str string
 ---@param capture string
-function M.get_node(buf, query_str, capture)
+function M.get_nodes(buf, query_str, capture)
   local root, query = M.parse_query(buf, query_str)
   if not root or not query then
     return
   end
 
+  ---@type TSNode[]
+  local nodes = {}
   for id, node in query:iter_captures(root, buf) do
     if query.captures[id] == capture then
-      return node
+      table.insert(nodes, node)
     end
   end
+
+  return nodes
+end
+
+---@param buf number
+---@param query_str string
+---@param capture string
+function M.get_node(buf, query_str, capture)
+  local nodes = M.get_nodes(buf, query_str, capture)
+  return nodes and nodes[1]
 end
 
 ---@param buf number
 ---@param name string
 function M.get_test_line(buf, name)
-  u.dbg("===============")
-  local query_str = go_test_func_query_str:format(name)
+  local capture = ('#eq? @_func_name "%s"'):format(name)
+  local query_str = M.go_test_func_query_str:format(capture)
   local node = M.get_node(buf, query_str, "_func_name")
   if not node then
     return
@@ -64,6 +78,7 @@ function M.get_test_line(buf, name)
   local row, col, erow, ecol = node:range()
   local func_name = vim.treesitter.get_node_text(node, buf)
 
+  u.title("get_test_line", true)
   u.dbg({
     func_name = func_name,
     row = row,
@@ -93,9 +108,8 @@ function M.get_test_func_at_cursor(buf)
   end
 
   local name = vim.treesitter.get_node_text(node, buf)
-  local line = node:range() + 1
   if name:sub(1, 4) == "Test" then
-    return name, line
+    return name, node:range() + 1
   end
 end
 

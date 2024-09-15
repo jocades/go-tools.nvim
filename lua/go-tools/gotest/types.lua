@@ -17,7 +17,7 @@
 
 ---@class gotest.OutputEntry : gotest.Entry
 ---@field Action "output"
----@field Test string
+---@field Test? string
 ---@field Output string
 
 ---@class gotest.DoneEntry : gotest.OutputEntry

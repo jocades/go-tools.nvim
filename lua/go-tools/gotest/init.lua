@@ -1,5 +1,6 @@
-local Split = require("nui.split")
+local TestView = require("go-tools.gotest.view")
 local q = require("go-tools.query")
+local time = require("go-tools.gotest.time")
 local u = require("go-tools.util")
 
 local M = {}
@@ -7,24 +8,17 @@ local M = {}
 local ns = vim.api.nvim_create_namespace("gotest")
 local group = vim.api.nvim_create_augroup("gotest", { clear = true })
 
-local function create_split()
-  return Split({
-    enter = false,
-    relative = "editor",
-    position = "bottom",
-    size = "20%",
-  })
+---@type gotest.Session
+local session
+local function start_session()
+  if not session then
+    ---@class gotest.Session
+    session = {
+      view = TestView(),
+    }
+  end
+  return vim.api.nvim_get_current_buf(), vim.api.nvim_buf_get_name(0)
 end
-
-local session = {
-  ---@type NuiSplit
-  split = nil,
-}
-
--- unmount component when cursor leaves buffer
--- split:on(event.BufLeave, function()
---   split:unmount()
--- end)
 
 ---@param entry gotest.Entry
 local function make_key(entry)
@@ -48,26 +42,27 @@ local function add_test(s, entry)
   }
 end
 
+---@param s gotest.State
 ---@param entry gotest.OutputEntry
 local function add_output(s, entry)
-  table.insert(s.tests[make_key(entry)].output, vim.trim(entry.Output))
+  local output = vim.trim(entry.Output)
+  if entry.Test then
+    table.insert(s.tests[make_key(entry)].output, output)
+  end
+  table.insert(s.output, output)
 end
 
+---@param s gotest.State
 ---@param entry gotest.DoneEntry
 local function mark_success(s, entry)
   s.tests[make_key(entry)].success = entry.Action == "pass"
-end
-
----@param path string
-local function is_go_test(path)
-  return path:match("_test.go$")
 end
 
 ---@param s gotest.State
 ---@param line string
 local function parse_line(s, line)
   local ok, decoded = pcall(vim.json.decode, line)
-  if not ok or not decoded.Test then
+  if not ok then
     return
   end
 
@@ -76,22 +71,25 @@ local function parse_line(s, line)
   elseif decoded.Action == "output" then
     add_output(s, decoded)
   elseif decoded.Action == "pass" or decoded.Action == "fail" then
-    mark_success(s, decoded)
+    if decoded.Test then
+      mark_success(s, decoded)
+    end
+    -- ...
   end
 end
 
+local virt_lines = {
+  {
+    ("Press '%st' to run the test, '%so' to show output."):format(
+      vim.g.mapleader,
+      vim.g.mapleader
+    ),
+    "CursorLineSign",
+  },
+}
+
 ---@param state gotest.State
 local function gotest(state)
-  local virt_lines = {
-    {
-      ("Press '%st' to run the test, '%so' to show output."):format(
-        vim.g.mapleader,
-        vim.g.mapleader
-      ),
-      "CursorLineSign",
-    },
-  }
-
   ---@param p vim.SystemCompleted
   return function(p)
     local lines = vim.split(p.stdout, "\n", { trimempty = true })
@@ -131,7 +129,7 @@ local function gotest(state)
 
     vim.diagnostic.set(ns, state.buf, diagnostics, {
       virtual_text = {
-        spacing = 0,
+        spacing = 2,
         prefix = " ",
       },
     })
@@ -141,16 +139,14 @@ end
 ---@param buf number
 ---@param cmd string[]
 local function execute(buf, cmd)
-  if not session.split then
-    session.split = create_split()
-  end
-
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 
   ---@class gotest.State
   local state = {
     pkg = "",
     buf = buf,
+    ---@type string[]
+    output = {},
     ---@type gotest.Test[]
     tests = {},
   }
@@ -159,26 +155,29 @@ local function execute(buf, cmd)
 
   vim.api.nvim_buf_create_user_command(buf, "GoTestDebug", function()
     print("==== go-test dbg ====")
-    u.ins(session.split.bufnr)
+    u.ins(session.view.bufnr)
     u.ins(state)
     vim.cmd.Noice()
   end, {})
 
-  vim.api.nvim_buf_create_user_command(buf, "GoTestDiag", function()
+  vim.api.nvim_buf_create_user_command(buf, "GoTestShowFunc", function()
     local func = q.get_test_func_at_cursor(buf)
     local key = ("%s/%s"):format(state.pkg, func)
     local test = state.tests[key]
     if not test then
       return
     end
-    session.split:mount()
-    vim.api.nvim_buf_set_lines(session.split.bufnr, 0, -1, false, test.output)
+    session.view:set(test.output)
+  end, {})
+
+  vim.api.nvim_buf_create_user_command(buf, "GoTestShow", function()
+    session.view:set(state.output)
   end, {})
 
   vim.keymap.set(
     "n",
     "<leader>o",
-    vim.cmd.GoTestDiag,
+    vim.cmd.GoTestShowFunc,
     { buffer = buf, desc = "Show test output" }
   )
 
@@ -188,25 +187,32 @@ local function execute(buf, cmd)
 end
 
 ---@param buf number
-function M.go_test(buf)
+local function get_path(buf)
   local path = vim.api.nvim_buf_get_name(buf)
-  if not is_go_test(path) then
-    return
+  if u.is_go_test(path) then
+    return path
   end
-
-  execute(buf, { "go", "test", "-json", path })
 end
 
 ---@param buf number
-function M.go_test_func(buf)
-  local path = vim.api.nvim_buf_get_name(buf)
-  if not is_go_test(path) then
+---@param path? string
+function M.go_test(buf, path)
+  path = path or get_path(buf)
+  if path then
+    execute(buf, { "go", "test", "-json", path })
+  end
+end
+
+---@param buf number
+---@param path? string
+function M.go_test_func(buf, path)
+  path = path or get_path(buf)
+  if not path then
     return
   end
 
   local func, line = q.get_test_func_at_cursor(buf)
   u.ins({ func, line }, true)
-
   if not func then
     return
   end
@@ -214,19 +220,54 @@ function M.go_test_func(buf)
   execute(buf, { "go", "test", "-json", "-run", func, path })
 end
 
+local function set_help(buf)
+  local nodes = q.get_nodes(
+    buf,
+    q.go_test_func_query_str:format('#match? @_func_name "^Test"'),
+    "_func_name"
+  )
+
+  if not nodes then
+    return
+  end
+
+  for _, node in ipairs(nodes) do
+    vim.print(vim.treesitter.get_node_text(node, buf))
+
+    vim.api.nvim_buf_set_extmark(buf, ns, node:range() - 1, 0, {
+      virt_lines = { virt_lines },
+    })
+  end
+end
+
 function M.setup()
+  vim.print("hello")
+
+  local dw = vim.fs.joinpath(vim.fn.stdpath("data") --[[@as string]], "gotools")
+  if not vim.uv.fs_stat(dw) then
+    vim.fn.mkdir(dw)
+  end
+
   vim.api.nvim_create_user_command("GoTest", function()
-    M.go_test(vim.api.nvim_get_current_buf())
+    local buf, _ = start_session()
+    M.go_test(buf)
   end, {})
 
   vim.api.nvim_create_user_command("GoTestFunc", function()
     M.go_test_func(vim.api.nvim_get_current_buf())
   end, {})
 
-  vim.api.nvim_create_autocmd("BufReadPost", {
-    pattern = "*_test.go",
-    once = true,
-    callback = function(e) end,
+  vim.api.nvim_create_autocmd("User", {
+    pattern = "VeryLazy",
+    callback = function()
+      vim.api.nvim_create_autocmd("BufReadPost", {
+        pattern = "*_test.go",
+        callback = function(e)
+          vim.notify("buf read post")
+          -- set_help(e.buf)
+        end,
+      })
+    end,
   })
 end
 
