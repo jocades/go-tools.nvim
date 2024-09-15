@@ -31,6 +31,11 @@ function M.create_popup(title)
   })
 end
 
+---@param buf number
+local function clear_buf(buf)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+end
+
 -- Execute shell command using vim.fn.system
 ---@param exec string | table { string }
 function M.sys(exec, debug)

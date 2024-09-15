@@ -56,34 +56,24 @@ end
 function M.get_test_line(buf, name)
   u.dbg("===============")
   local query_str = go_test_func_query_str:format(name)
-  local root, query = M.parse_query(buf, query_str)
-  if not root or not query then
+  local node = M.get_node(buf, query_str, "_func_name")
+  if not node then
     return
   end
 
-  for id, node in query:iter_captures(root, buf) do
-    local capture = query.captures[id]
-    u.dbg(id)
-    u.dbg(capture)
+  local row, col, erow, ecol = node:range()
+  local func_name = vim.treesitter.get_node_text(node, buf)
 
-    if capture == "_func_name" then
-      local srow, scol, erow, ecol = node:range()
-      local func_name = vim.treesitter.get_node_text(node, buf)
+  u.dbg({
+    func_name = func_name,
+    row = row,
+    col = col,
+    erow = erow,
+    ecol = ecol,
+  })
 
-      u.dbg({
-        func_name = func_name,
-        srow = srow,
-        scol = scol,
-        erow = erow,
-        ecol = ecol,
-      })
-
-      if func_name == name then
-        -- treesitter uses c-style indexing...
-        return srow + 1
-      end
-    end
-  end
+  -- treesitter uses c-style indexing
+  return row + 1
 end
 
 ---@param buf number
