@@ -36,9 +36,25 @@ function M.parse_query(buf, query_str)
 end
 
 ---@param buf number
+---@param query_str string
+---@param capture string
+function M.get_node(buf, query_str, capture)
+  local root, query = M.parse_query(buf, query_str)
+  if not root or not query then
+    return
+  end
+
+  for id, node in query:iter_captures(root, buf) do
+    if query.captures[id] == capture then
+      return node
+    end
+  end
+end
+
+---@param buf number
 ---@param name string
 function M.get_test_line(buf, name)
-  u.debug("===============")
+  u.dbg("===============")
   local query_str = go_test_func_query_str:format(name)
   local root, query = M.parse_query(buf, query_str)
   if not root or not query then
@@ -47,14 +63,14 @@ function M.get_test_line(buf, name)
 
   for id, node in query:iter_captures(root, buf) do
     local capture = query.captures[id]
-    u.debug(id)
-    u.debug(capture)
+    u.dbg(id)
+    u.dbg(capture)
 
     if capture == "_func_name" then
       local srow, scol, erow, ecol = node:range()
       local func_name = vim.treesitter.get_node_text(node, buf)
 
-      vim.print({
+      u.dbg({
         func_name = func_name,
         srow = srow,
         scol = scol,
@@ -76,6 +92,7 @@ function M.get_test_func_at_cursor(buf)
 
   while node do
     if node:type() == "function_declaration" then
+      node = node:named_child(0)
       break
     end
     node = node:parent()
@@ -85,10 +102,31 @@ function M.get_test_func_at_cursor(buf)
     return
   end
 
-  local func = vim.treesitter.get_node_text(node:named_child(0), buf)
-  if func:sub(1, 4) == "Test" then
-    return func
+  local name = vim.treesitter.get_node_text(node, buf)
+  local line = node:range() + 1
+  if name:sub(1, 4) == "Test" then
+    return name, line
   end
+end
+
+---@param buf number
+function M.get_pkg_name(buf)
+  local pkg_node = M.get_node(
+    buf,
+    [[
+      ((source_file
+        (package_clause
+          (package_identifier) @_pkg_name)))
+    ]],
+    "_pkg_name"
+  )
+
+  if not pkg_node then
+    return
+  end
+
+  local pkg = vim.treesitter.get_node_text(pkg_node, buf)
+  u.dbg(pkg)
 end
 
 return M

@@ -1,10 +1,30 @@
-local q = require("go-tools.gotest.query")
+local Split = require("nui.split")
+local q = require("go-tools.query")
 local u = require("go-tools.util")
 
 local M = {}
 
 local ns = vim.api.nvim_create_namespace("gotest")
 local group = vim.api.nvim_create_augroup("gotest", { clear = true })
+
+local function create_split()
+  return Split({
+    enter = false,
+    relative = "editor",
+    position = "bottom",
+    size = "20%",
+  })
+end
+
+local session = {
+  ---@type NuiSplit
+  split = nil,
+}
+
+-- unmount component when cursor leaves buffer
+-- split:on(event.BufLeave, function()
+--   split:unmount()
+-- end)
 
 ---@param entry go_test.Entry
 local function make_key(entry)
@@ -15,11 +35,16 @@ end
 
 ---@param entry go_test.RunEntry
 local function add_test(s, entry)
+  if s.pkg == "" then
+    s.pkg = entry.Package
+  end
+
+  ---@class go_test.Test
   s.tests[make_key(entry)] = {
     pkg = entry.Package,
-    name = entry.Test,
     line = q.get_test_line(s.buf, entry.Test),
     output = {},
+    success = false,
   }
 end
 
@@ -43,7 +68,7 @@ local function clear(buf)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
 end
 
----@param s go_test.exec.State
+---@param s go_test.State
 ---@param line string
 local function parse_line(s, line)
   if vim.trim(line) == "" then
@@ -67,29 +92,33 @@ end
 ---@param buf number
 ---@param cmd string[]
 local function execute(buf, cmd)
-  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  if not session.split then
+    session.split = create_split()
+  end
 
-  ---@class go_test.exec.State
+  ---@class go_test.State
   local state = {
+    pkg = "",
     buf = buf,
-    out_buf = -1,
+    ---@type go_test.Test[]
     tests = {},
   }
 
+  vim.api.nvim_buf_create_user_command(buf, "GoTestDebug", function()
+    print("==== go-test dbg ====")
+    u.ins(session.split.bufnr)
+    u.ins(state, true)
+  end, {})
+
   vim.api.nvim_buf_create_user_command(buf, "GoTestDiag", function()
-    local line = vim.fn.line(".")
-    u.ins(state.tests)
-    for _, test in pairs(state.tests) do
-      if test.line == line then
-        if state.out_buf == -1 then
-          state.out_buf = vim.api.nvim_create_buf(false, true)
-          vim.cmd.split()
-          vim.api.nvim_set_current_buf(state.out_buf)
-          vim.api.nvim_win_set_height(0, 12)
-        end
-        vim.api.nvim_buf_set_lines(state.out_buf, 0, -1, false, test.output)
-      end
+    local func = q.get_test_func_at_cursor(buf)
+    local key = ("%s/%s"):format(state.pkg, func)
+    local test = state.tests[key]
+    if not test then
+      return
     end
+    session.split:mount()
+    vim.api.nvim_buf_set_lines(session.split.bufnr, 0, -1, false, test.output)
   end, {})
 
   vim.fn.jobstart(table.concat(cmd, " "), {
@@ -98,9 +127,18 @@ local function execute(buf, cmd)
       if not data then
         return
       end
+      u.ins(data)
+
       for _, line in ipairs(data) do
         parse_line(state, line)
       end
+    end,
+    on_stderr = function(_, data)
+      local out = table.concat(data, "\n")
+      if vim.trim(out) == "" then
+        return
+      end
+      u.err(table.concat(data, "\n"))
     end,
     on_exit = function()
       ---@type vim.Diagnostic[]
@@ -125,13 +163,12 @@ local function execute(buf, cmd)
         end
       end
 
-      u.ins(state)
+      u.dbg(state)
 
       vim.diagnostic.set(ns, buf, diagnostics, {
         virtual_text = {
-          spacing = 4,
+          spacing = 0,
           prefix = " ",
-          -- prefix = "●",
         },
       })
     end,
@@ -155,8 +192,8 @@ function M.go_test_func(buf)
     return
   end
 
-  local func = q.get_test_func_at_cursor(buf)
-  u.ins(func, true)
+  local func, line = q.get_test_func_at_cursor(buf)
+  u.ins({ func, line }, true)
 
   if not func then
     return
