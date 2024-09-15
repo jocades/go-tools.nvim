@@ -6,6 +6,12 @@ function M.err(msg, title)
   vim.notify(msg, vim.log.levels.ERROR, { title = title or "go-tools" })
 end
 
+---@param msg string
+---@param title? string
+function M.warn(msg, title)
+  vim.notify(msg, vim.log.levels.WARN, { title = title or "go-tools" })
+end
+
 function M.ins(what, noti)
   if noti then
     vim.notify(vim.inspect(what))
@@ -27,11 +33,6 @@ function M.title(s, dbg)
   else
     vim.print(title)
   end
-end
-
----@param path string
-function M.is_go_test(path)
-  return path:match("_test.go$")
 end
 
 return M

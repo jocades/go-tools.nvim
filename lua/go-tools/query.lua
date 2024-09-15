@@ -3,7 +3,7 @@ local u = require("go-tools.util")
 
 local M = {}
 
-M.go_test_func_query_str = [[
+local go_test_func_query_str = [[
   ((function_declaration
     name: (identifier) @_func_name
     parameters: (parameter_list
@@ -17,8 +17,15 @@ M.go_test_func_query_str = [[
     (#eq? @_type_name "T")
     (%s))
 ]]
-
 -- (#eq? @_func_name "%s"))
+
+local go_struct_type_query_str = [[
+  ((type_declaration
+    (type_spec
+      name: (type_identifier) @_struct_name
+      type: (struct_type
+        (field_declaration_list)))))
+]]
 
 ---@param buf number
 ---@param query_str string
@@ -69,15 +76,13 @@ end
 ---@param name string
 function M.get_test_line(buf, name)
   local capture = ('#eq? @_func_name "%s"'):format(name)
-  local query_str = M.go_test_func_query_str:format(capture)
+  local query_str = go_test_func_query_str:format(capture)
   local node = M.get_node(buf, query_str, "_func_name")
   if not node then
     return
   end
-
   local row, col, erow, ecol = node:range()
   local func_name = vim.treesitter.get_node_text(node, buf)
-
   u.title("get_test_line", true)
   u.dbg({
     func_name = func_name,
@@ -86,7 +91,6 @@ function M.get_test_line(buf, name)
     erow = erow,
     ecol = ecol,
   })
-
   -- treesitter uses c-style indexing
   return row + 1
 end
@@ -94,7 +98,6 @@ end
 ---@param buf number
 function M.get_test_func_at_cursor(buf)
   local node = tsu.get_node_at_cursor()
-
   while node do
     if node:type() == "function_declaration" then
       node = node:named_child(0)
@@ -102,15 +105,37 @@ function M.get_test_func_at_cursor(buf)
     end
     node = node:parent()
   end
-
   if not node then
     return
   end
-
   local name = vim.treesitter.get_node_text(node, buf)
   if name:sub(1, 4) == "Test" then
     return name, node:range() + 1
   end
+end
+
+---@param buf number
+function M.get_struct_at_cursor(buf)
+  local node = tsu.get_node_at_cursor()
+
+  while node do
+    if node:type() == "type_declaration" then
+      if node:named_child(0):child(1):type() == "struct_type" then
+        local name = node:named_child(0):child(0)
+        return name and vim.treesitter.get_node_text(name, buf)
+      end
+    end
+    node = node:parent()
+  end
+end
+
+---@param buf number
+function M.get_test_func_nodes(buf)
+  return M.get_nodes(
+    buf,
+    go_test_func_query_str:format('#match? @_func_name "^Test"'),
+    "_func_name"
+  )
 end
 
 ---@param buf number

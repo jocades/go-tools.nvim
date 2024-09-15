@@ -4,14 +4,15 @@ local Split = require("nui.split")
 ---@overload fun(): TestView
 local TestView = Split:extend("TestView")
 
-function TestView:init(popup_options)
-  local options = vim.tbl_deep_extend("force", popup_options or {}, {
-    relative = "editor",
-    position = "bottom",
-    size = "20%",
-  })
-
-  TestView.super.init(self, options)
+function TestView:init(opts)
+  TestView.super.init(
+    self,
+    vim.tbl_deep_extend("force", opts or {}, {
+      relative = "editor",
+      position = "bottom",
+      size = "20%",
+    })
+  )
 end
 
 ---@param data string[]

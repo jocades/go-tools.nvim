@@ -1,5 +1,7 @@
 ---@meta
 
+---Output schema for 'go test -json'.
+
 ---@class gotest.Entry
 ---@field Time string
 ---@field Action string

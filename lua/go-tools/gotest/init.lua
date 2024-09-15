@@ -1,12 +1,11 @@
 local TestView = require("go-tools.gotest.view")
 local q = require("go-tools.query")
-local time = require("go-tools.gotest.time")
 local u = require("go-tools.util")
 
 local M = {}
 
-local ns = vim.api.nvim_create_namespace("gotest")
-local group = vim.api.nvim_create_augroup("gotest", { clear = true })
+local ns = vim.api.nvim_create_namespace("go-tools.gotest")
+-- local group = vim.api.nvim_create_augroup("go-tools.gotest", { clear = true })
 
 ---@type gotest.Session
 local session
@@ -17,7 +16,7 @@ local function start_session()
       view = TestView(),
     }
   end
-  return vim.api.nvim_get_current_buf(), vim.api.nvim_buf_get_name(0)
+  return vim.api.nvim_get_current_buf()
 end
 
 ---@param entry gotest.Entry
@@ -125,8 +124,6 @@ local function gotest(state)
       })
     end
 
-    u.dbg(state)
-
     vim.diagnostic.set(ns, state.buf, diagnostics, {
       virtual_text = {
         spacing = 2,
@@ -153,18 +150,11 @@ local function execute(buf, cmd)
 
   vim.system(cmd, { text = true }, vim.schedule_wrap(gotest(state)))
 
-  vim.api.nvim_buf_create_user_command(buf, "GoTestDebug", function()
-    print("==== go-test dbg ====")
-    u.ins(session.view.bufnr)
-    u.ins(state)
-    vim.cmd.Noice()
-  end, {})
-
   vim.api.nvim_buf_create_user_command(buf, "GoTestShowFunc", function()
     local func = q.get_test_func_at_cursor(buf)
     local key = ("%s/%s"):format(state.pkg, func)
     local test = state.tests[key]
-    if not test then
+    if test then
       return
     end
     session.view:set(test.output)
@@ -174,6 +164,10 @@ local function execute(buf, cmd)
     session.view:set(state.output)
   end, {})
 
+  vim.keymap.set("n", "<leader>t", function()
+    M.go_test_func(buf)
+  end, { buffer = buf, desc = "Run test at cursor" })
+
   vim.keymap.set(
     "n",
     "<leader>o",
@@ -181,21 +175,30 @@ local function execute(buf, cmd)
     { buffer = buf, desc = "Show test output" }
   )
 
-  vim.keymap.set("n", "<leader>t", function()
-    M.go_test_func(buf)
-  end, { buffer = buf, desc = "Run test at cursor" })
+  if vim.env.DEBUG == "go-test" then
+    vim.api.nvim_buf_create_user_command(buf, "GoTestDebug", function()
+      u.title("go_test dbg")
+      u.ins(session.view.bufnr)
+      u.ins(state)
+      vim.cmd.Noice()
+    end, {})
+  end
+end
+
+---@param path string
+local function is_go_test(path)
+  return path:match("_test.go$")
 end
 
 ---@param buf number
 local function get_path(buf)
   local path = vim.api.nvim_buf_get_name(buf)
-  if u.is_go_test(path) then
+  if is_go_test(path) then
     return path
   end
 end
 
 ---@param buf number
----@param path? string
 function M.go_test(buf, path)
   path = path or get_path(buf)
   if path then
@@ -204,71 +207,40 @@ function M.go_test(buf, path)
 end
 
 ---@param buf number
----@param path? string
-function M.go_test_func(buf, path)
-  path = path or get_path(buf)
+---@param name? string
+function M.go_test_func(buf, name)
+  local path = get_path(buf)
   if not path then
     return
   end
 
-  local func, line = q.get_test_func_at_cursor(buf)
-  u.ins({ func, line }, true)
-  if not func then
-    return
+  if not name then
+    name = q.get_test_func_at_cursor(buf)
+    if not name then
+      u.warn("No 'TestFunc' found at cursor.", "gotest")
+      return
+    end
   end
 
-  execute(buf, { "go", "test", "-json", "-run", func, path })
-end
-
-local function set_help(buf)
-  local nodes = q.get_nodes(
-    buf,
-    q.go_test_func_query_str:format('#match? @_func_name "^Test"'),
-    "_func_name"
-  )
-
-  if not nodes then
-    return
-  end
-
-  for _, node in ipairs(nodes) do
-    vim.print(vim.treesitter.get_node_text(node, buf))
-
-    vim.api.nvim_buf_set_extmark(buf, ns, node:range() - 1, 0, {
-      virt_lines = { virt_lines },
-    })
-  end
+  execute(buf, { "go", "test", "-json", "-run", name, path })
 end
 
 function M.setup()
-  vim.print("hello")
-
-  local dw = vim.fs.joinpath(vim.fn.stdpath("data") --[[@as string]], "gotools")
-  if not vim.uv.fs_stat(dw) then
-    vim.fn.mkdir(dw)
-  end
-
   vim.api.nvim_create_user_command("GoTest", function()
-    local buf, _ = start_session()
+    local buf = start_session()
     M.go_test(buf)
   end, {})
 
   vim.api.nvim_create_user_command("GoTestFunc", function()
-    M.go_test_func(vim.api.nvim_get_current_buf())
+    local buf = start_session()
+    M.go_test_func(buf)
   end, {})
 
-  vim.api.nvim_create_autocmd("User", {
-    pattern = "VeryLazy",
-    callback = function()
-      vim.api.nvim_create_autocmd("BufReadPost", {
-        pattern = "*_test.go",
-        callback = function(e)
-          vim.notify("buf read post")
-          -- set_help(e.buf)
-        end,
-      })
+  --[[ vim.api.nvim_create_autocmd("BufReadPost", {
+    pattern = "*_test.go",
+    callback = function(e)
     end,
-  })
+  }) ]]
 end
 
 return M
