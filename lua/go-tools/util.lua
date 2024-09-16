@@ -1,17 +1,5 @@
 local M = {}
 
----@param msg string
----@param title? string
-function M.err(msg, title)
-  vim.notify(msg, vim.log.levels.ERROR, { title = title or "go-tools" })
-end
-
----@param msg string
----@param title? string
-function M.warn(msg, title)
-  vim.notify(msg, vim.log.levels.WARN, { title = title or "go-tools" })
-end
-
 function M.ins(what)
   vim.print(vim.inspect(what))
 end
@@ -41,5 +29,7 @@ end
 function M.to_csv(ls)
   return type(ls) == "table" and table.concat(ls, ",") or ls or "" ---@diagnostic disable-line: return-type-mismatch
 end
+
+M.log = require("go-tools.log")("go-tools")
 
 return M

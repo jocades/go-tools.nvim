@@ -1,11 +1,12 @@
 local TestView = require("go-tools.gotest.view")
+local log = require("go-tools.log")("gotest")
 local q = require("go-tools.query")
 local u = require("go-tools.util")
 
 local M = {}
 
 local ns = vim.api.nvim_create_namespace("go-tools.gotest")
--- local group = vim.api.nvim_create_augroup("go-tools.gotest", { clear = true })
+local group = vim.api.nvim_create_augroup("go-tools.gotest", { clear = true })
 
 ---@param path string
 local function is_go_test(path)
@@ -204,29 +205,52 @@ end
 
 function M.run_func()
   local name = q.get_test_func_name_at_cursor()
-  u.ins(name)
   if not name then
-    u.warn("No 'TestFunc' found at cursor.", "gotest")
+    log.warn("No 'TestFunc' found at cursor.")
     return
   end
 
-  -- execute(name)
+  execute(name)
 end
 
 function M.setup()
-  vim.api.nvim_create_user_command("GoTest", function()
-    M.run()
-  end, {})
-
-  vim.api.nvim_create_user_command("GoTestFunc", function()
-    M.run_func()
-  end, {})
-
-  --[[ vim.api.nvim_create_autocmd("BufReadPost", {
+  vim.api.nvim_create_autocmd("BufEnter", {
     pattern = "*_test.go",
+    group = group,
     callback = function(e)
+      vim.api.nvim_buf_create_user_command(e.buf, "GoTest", function()
+        M.run()
+      end, {})
+
+      vim.api.nvim_buf_create_user_command(e.buf, "GoTestFunc", function()
+        M.run_func()
+      end, {})
+
+      local id
+      vim.api.nvim_buf_create_user_command(e.buf, "GoTestOnSave", function(args)
+        -- Detach
+        if args.bang and id then
+          vim.api.nvim_del_autocmd(id)
+          id = nil
+          return
+        end
+
+        -- Attach
+        if not args.bang then
+          if not id then
+            M.run()
+          end
+
+          id = vim.api.nvim_create_autocmd("BufWritePost", {
+            buffer = e.buf,
+            callback = function()
+              M.run()
+            end,
+          })
+        end
+      end, { bang = true })
     end,
-  }) ]]
+  })
 end
 
 return M

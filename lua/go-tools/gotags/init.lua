@@ -1,4 +1,5 @@
 local Command = require("go-tools.cmd")
+local log = require("go-tools.log")("gotags")
 local q = require("go-tools.query")
 local u = require("go-tools.util")
 
@@ -24,19 +25,18 @@ local user_opts = {
 
 ---@param opts gotags.execute.Opts
 local function execute(opts)
-  u.dbg(opts)
   local buf = vim.api.nvim_get_current_buf()
   local cmd = Command({ "gomodifytags", "-format", "json" })
 
   if not opts.range then
     local struct = q.get_struct_name_at_cursor(buf)
     if not struct then
-      u.warn("No struct found at cursor")
+      u.log.warn("No struct found at cursor")
       return
     end
     cmd:flag("struct", struct)
   else
-    cmd:flag("line", table.concat(opts.range, ","))
+    cmd:flag("line", u.to_csv(opts.range))
   end
 
   cmd:flag("file", vim.api.nvim_buf_get_name(buf))
@@ -51,11 +51,9 @@ local function execute(opts)
     cmd:flag(opts.action, u.to_csv(opts.tags))
   end
 
-  u.dbg(cmd:build())
-
   cmd:spawn(function(p)
     if p.code ~= 0 then
-      u.err(p.stderr, "gotags")
+      log.error(p.stderr)
       return
     end
 
@@ -101,29 +99,32 @@ local user_cmd_args = {
 
 ---Parse key value pairs passed by a user_command.
 ---':GoTagsAdd tags=json,xml transform=camelcase'
----@param opts vim.user_command.Opts
-local function parse(opts)
+---@param args vim.user_command.Args
+local function parse(args)
   ---@type gotags.action.Opts
-  local out = {}
-  for _, arg in ipairs(opts.fargs) do
+  local opts = {}
+  for _, arg in ipairs(args.fargs) do
     local k, v = unpack(vim.split(arg, "="))
     if vim.tbl_contains(user_cmd_args, k) then
-      out[k] = v
+      opts[k] = v
     else
-      u.warn(("Unknown option: %s"):format(k))
+      log.warn(("Unknown option: %s"):format(k))
       return
     end
   end
   -- If range is 0: no selection, else if 2: line or block selected.
-  if opts.range == 2 then
-    out.range = { opts.line1, opts.line2 }
+  if args.range == 2 then
+    opts.range = { args.line1, args.line2 }
   end
-  return out
+  return opts
 end
+
+local group = vim.api.nvim_create_augroup("go-tools.gotags", { clear = true })
 
 function M.setup()
   vim.api.nvim_create_autocmd("BufEnter", {
     pattern = "*.go",
+    group = group,
     callback = function(e)
       vim.api.nvim_buf_create_user_command(e.buf, "GoTagsAdd", function(opts)
         opts = parse(opts)
@@ -148,15 +149,5 @@ function M.setup()
     end,
   })
 end
-
----@class vim.user_command.Opts
----@field name string
----@field fargs string[]
----@field bang boolean
----@field line1 number
----@field line2 number
----@field range number
----@field count number
----@field smods table
 
 return M

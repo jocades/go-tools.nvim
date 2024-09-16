@@ -1,7 +1,6 @@
 ---@meta
 
 ---Output schema for 'go test -json'.
-
 ---@class gotest.Entry
 ---@field Time string
 ---@field Action string
@@ -32,3 +31,14 @@
 
 ---@class gotest.FailEntry : gotest.DoneEntry
 ---@field Action "fail"
+
+---User command callback argument.
+---@class vim.user_command.Args
+---@field name string
+---@field fargs string[]
+---@field bang boolean
+---@field line1 number
+---@field line2 number
+---@field range number
+---@field count number
+---@field smods table

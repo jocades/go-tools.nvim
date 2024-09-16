@@ -34,7 +34,7 @@ function M.parse_query(buf, query_str)
   local lang = vim.treesitter.language.get_lang(ft)
 
   if not lang then
-    u.err("No treesitter parser found for " .. ft)
+    u.log.error("No treesitter parser found for " .. ft)
     return
   end
 
