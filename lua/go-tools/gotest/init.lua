@@ -79,59 +79,13 @@ end
 
 local virt_lines = {
   {
-    ("Press '%st' to run the test, '%so' to show output."):format(
+    ("Press '%st' to run the test, '%ss' to show output."):format(
       vim.g.mapleader,
       vim.g.mapleader
     ),
     "CursorLineSign",
   },
 }
-
----@param state gotest.State
-local function gotest(state)
-  ---@param p vim.SystemCompleted
-  return function(p)
-    local lines = vim.split(p.stdout, "\n", { trimempty = true })
-
-    for _, line in ipairs(lines) do
-      parse_line(state, line)
-    end
-
-    ---@type vim.Diagnostic[]
-    local diagnostics = {}
-
-    for _, test in pairs(state.tests) do
-      if test.success then
-        table.insert(diagnostics, {
-          lnum = test.line - 1,
-          col = 0,
-          severity = vim.diagnostic.severity.INFO,
-          source = "gotest",
-          message = "PASS",
-        })
-      else
-        table.insert(diagnostics, {
-          lnum = test.line - 1,
-          col = 0,
-          severity = vim.diagnostic.severity.ERROR,
-          source = "gotest",
-          message = "FAIL",
-        })
-      end
-
-      vim.api.nvim_buf_set_extmark(state.buf, ns, test.line - 2, 0, {
-        virt_lines = { virt_lines },
-      })
-    end
-
-    vim.diagnostic.set(ns, state.buf, diagnostics, {
-      virtual_text = {
-        spacing = 2,
-        prefix = " ",
-      },
-    })
-  end
-end
 
 ---@param buf number
 ---@param cmd string[]
@@ -148,39 +102,79 @@ local function execute(buf, cmd)
     tests = {},
   }
 
-  vim.system(cmd, { text = true }, vim.schedule_wrap(gotest(state)))
+  vim.api.nvim_buf_create_user_command(buf, "GoTestShow", function()
+    session.view:set(state.output)
+  end, {})
 
   vim.api.nvim_buf_create_user_command(buf, "GoTestShowFunc", function()
     local func = q.get_test_func_at_cursor(buf)
     local key = ("%s/%s"):format(state.pkg, func)
     local test = state.tests[key]
     if test then
-      return
+      session.view:set(test.output)
     end
-    session.view:set(test.output)
-  end, {})
-
-  vim.api.nvim_buf_create_user_command(buf, "GoTestShow", function()
-    session.view:set(state.output)
   end, {})
 
   vim.keymap.set("n", "<leader>t", function()
     M.go_test_func(buf)
-  end, { buffer = buf, desc = "Run test at cursor" })
+  end, { buffer = buf, desc = "Run test at cursor", nowait = true })
 
   vim.keymap.set(
     "n",
-    "<leader>o",
+    "<leader>s",
     vim.cmd.GoTestShowFunc,
-    { buffer = buf, desc = "Show test output" }
+    { buffer = buf, desc = "Show test output", nowait = true }
   )
+
+  vim.system(cmd, { text = true }, function(p)
+    local lines = vim.split(p.stdout, "\n", { trimempty = true })
+
+    vim.schedule(function()
+      for _, line in ipairs(lines) do
+        parse_line(state, line)
+      end
+
+      ---@type vim.Diagnostic[]
+      local diagnostics = {}
+
+      for _, test in pairs(state.tests) do
+        if test.success then
+          table.insert(diagnostics, {
+            lnum = test.line - 1,
+            col = 0,
+            severity = vim.diagnostic.severity.INFO,
+            source = "gotest",
+            message = "PASS",
+          })
+        else
+          table.insert(diagnostics, {
+            lnum = test.line - 1,
+            col = 0,
+            severity = vim.diagnostic.severity.ERROR,
+            source = "gotest",
+            message = "FAIL",
+          })
+        end
+
+        vim.api.nvim_buf_set_extmark(state.buf, ns, test.line - 2, 0, {
+          virt_lines = { virt_lines },
+        })
+      end
+
+      vim.diagnostic.set(ns, state.buf, diagnostics, {
+        virtual_text = {
+          spacing = 2,
+          prefix = " ",
+        },
+      })
+    end)
+  end)
 
   if vim.env.DEBUG == "go-test" then
     vim.api.nvim_buf_create_user_command(buf, "GoTestDebug", function()
       u.title("go_test dbg")
       u.ins(session.view.bufnr)
       u.ins(state)
-      vim.cmd.Noice()
     end, {})
   end
 end

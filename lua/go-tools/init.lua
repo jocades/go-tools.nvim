@@ -7,7 +7,7 @@ function M.setup()
   end
 
   require("go-tools.gotest").setup()
-  require("go-tools.gomodifytags").setup()
+  require("go-tools.gotags").setup()
 end
 
 return M
