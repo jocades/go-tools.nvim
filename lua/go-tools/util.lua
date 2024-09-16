@@ -12,17 +12,13 @@ function M.warn(msg, title)
   vim.notify(msg, vim.log.levels.WARN, { title = title or "go-tools" })
 end
 
-function M.ins(what, noti)
-  if noti then
-    vim.notify(vim.inspect(what))
-  else
-    print(vim.inspect(what))
-  end
+function M.ins(what)
+  vim.print(vim.inspect(what))
 end
 
-function M.dbg(what, noti)
+function M.dbg(what)
   if vim.env.DEBUG == "go-tools" then
-    M.ins(what, noti)
+    M.ins(what)
   end
 end
 
@@ -33,6 +29,17 @@ function M.title(s, dbg)
   else
     vim.print(title)
   end
+end
+
+---@vararg table
+function M.merge(...)
+  return vim.tbl_deep_extend("force", ...)
+end
+
+---@param ls? string|string[]
+---@return string
+function M.to_csv(ls)
+  return type(ls) == "table" and table.concat(ls, ",") or ls or "" ---@diagnostic disable-line: return-type-mismatch
 end
 
 return M
