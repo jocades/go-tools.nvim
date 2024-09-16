@@ -73,6 +73,15 @@ function M.get_node(buf, query_str, capture)
 end
 
 ---@param buf number
+function M.get_test_func_nodes(buf)
+  return M.get_nodes(
+    buf,
+    go_test_func_query_str:format('#match? @_func_name "^Test"'),
+    "_func_name"
+  )
+end
+
+---@param buf number
 ---@param name string
 function M.get_test_line(buf, name)
   local capture = ('#eq? @_func_name "%s"'):format(name)
@@ -122,20 +131,13 @@ function M.get_struct_at_cursor(buf)
     if node:type() == "type_declaration" then
       if node:named_child(0):child(1):type() == "struct_type" then
         local name = node:named_child(0):child(0)
-        return name and vim.treesitter.get_node_text(name, buf)
+        if name then
+          return vim.treesitter.get_node_text(name, buf)
+        end
       end
     end
     node = node:parent()
   end
-end
-
----@param buf number
-function M.get_test_func_nodes(buf)
-  return M.get_nodes(
-    buf,
-    go_test_func_query_str:format('#match? @_func_name "^Test"'),
-    "_func_name"
-  )
 end
 
 ---@param buf number
