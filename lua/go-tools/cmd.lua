@@ -1,58 +1,65 @@
----@param args string[]
+---@param init_args string[]
 ---@param opts? { flag_prefix?: string }
-local function Command(args, opts)
+local function Command(init_args, opts)
   opts = opts or {}
 
   ---@class Command
   local cmd = {
+    _args = init_args,
     ---@type table<string,string>
     _flags = {},
   }
 
-  local function make_key(flag)
+  ---@param flag string
+  local function make_flag(flag)
     return (opts.flag_prefix or "-") .. flag
   end
 
-  ---@param key string
-  ---@param val string
-  function cmd:set(key, val)
-    self._flags[key] = val
-  end
-
+  ---Add an argument.
   ---@param val string
   function cmd:arg(val)
-    table.insert(args, val)
+    table.insert(self._args, val)
   end
 
+  ---Set an option.
   ---@param key string
-  ---@param val string
-  function cmd:flag(key, val)
-    if not key or not val then
+  ---@param val? string
+  function cmd:opt(key, val)
+    if not val then
+      table.insert(self._args, make_flag(key))
       return
     end
-    self._flags[make_key(key)] = val
+    self._flags[make_flag(key)] = val
+  end
+
+  ---Set an option only if a value is provided.
+  ---@param key string
+  ---@param val? string
+  function cmd:optif(key, val)
+    if val then
+      self:opt(key, val)
+    end
   end
 
   ---@param flag string
   function cmd:get(flag)
-    return self._flags[make_key(flag)]
+    return self._flags[make_flag(flag)]
   end
 
   ---@param flag string
   function cmd:has(flag)
-    return self._flags[make_key(flag)] ~= nil
+    return self._flags[make_flag(flag)] ~= nil
   end
 
-  ---@param arg? string
-  function cmd:build(arg)
+  function cmd:build()
     for k, v in pairs(self._flags) do
-      table.insert(args, k)
-      table.insert(args, v)
+      table.insert(self._args, k)
+      table.insert(self._args, v)
     end
-    if arg then
-      table.insert(args, arg)
-    end
-    return args
+    --[[ for _, arg in ipairs(self._args) do
+      table.insert(self._args, arg)
+    end ]]
+    return self._args
   end
 
   ---@param callback fun(p: vim.SystemCompleted)

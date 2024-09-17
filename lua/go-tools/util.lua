@@ -19,9 +19,24 @@ function M.title(s, dbg)
   end
 end
 
+---Merge any number of tables recursively without modifying the original tables.
 ---@vararg table
-function M.merge(...)
+---@return table # The extended table
+function M.extend(...)
   return vim.tbl_deep_extend("force", ...)
+end
+
+---Merge two tables recursively, modifying the first table.
+---@param t1 table
+---@param t2 table
+function M.merge(t1, t2)
+  for k, v in pairs(t2) do
+    if type(v) == "table" then
+      t1[k] = M.extend(t1[k] or {}, v)
+    else
+      t1[k] = v
+    end
+  end
 end
 
 ---@param ls? string|string[]

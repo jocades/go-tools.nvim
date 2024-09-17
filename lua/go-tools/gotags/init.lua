@@ -34,22 +34,21 @@ local function execute(opts)
       u.log.warn("No struct found at cursor")
       return
     end
-    cmd:flag("struct", struct)
+    cmd:opt("struct", struct)
   else
-    cmd:flag("line", u.to_csv(opts.range))
+    cmd:opt("line", u.to_csv(opts.range))
   end
 
-  cmd:flag("file", vim.api.nvim_buf_get_name(buf))
-  cmd:flag("transform", opts.transform)
-  if opts.template then
-    cmd:flag("template", opts.template)
-  end
+  cmd:opt("file", vim.api.nvim_buf_get_name(buf))
 
   if opts.action == "clear-tags" then
-    cmd:arg("-" .. opts.action)
+    cmd:opt(opts.action)
   else
-    cmd:flag(opts.action, u.to_csv(opts.tags))
+    cmd:opt(opts.action, u.to_csv(opts.tags))
   end
+
+  cmd:optif("transform", opts.transform)
+  cmd:optif("template", opts.template)
 
   cmd:spawn(function(p)
     if p.code ~= 0 then
@@ -76,12 +75,12 @@ end
 
 ---@param opts? gotags.action.Opts
 function M.add(opts)
-  execute(u.merge(user_opts, opts or {}, { action = "add-tags" }))
+  execute(u.extend(user_opts, opts or {}, { action = "add-tags" }))
 end
 
 ---@param opts? gotags.action.Opts
 function M.remove(opts)
-  execute(u.merge(user_opts, opts or {}, { action = "remove-tags" }))
+  execute(u.extend(user_opts, opts or {}, { action = "remove-tags" }))
 end
 
 ---@param opts? { range: [number,number] }
@@ -121,29 +120,32 @@ end
 
 local group = vim.api.nvim_create_augroup("go-tools.gotags", { clear = true })
 
-function M.setup()
+---@param opts? gotags.Opts
+function M.setup(opts)
+  u.merge(user_opts, opts or {})
+
   vim.api.nvim_create_autocmd("BufEnter", {
     pattern = "*.go",
     group = group,
     callback = function(e)
-      vim.api.nvim_buf_create_user_command(e.buf, "GoTagsAdd", function(opts)
-        opts = parse(opts)
-        if opts then
-          M.add(opts)
+      vim.api.nvim_buf_create_user_command(e.buf, "GoTagsAdd", function(args)
+        args = parse(args)
+        if args then
+          M.add(args)
         end
       end, { nargs = "*", range = true })
 
-      vim.api.nvim_buf_create_user_command(e.buf, "GoTagsRemove", function(opts)
-        opts = parse(opts)
-        if opts then
-          M.remove(opts)
+      vim.api.nvim_buf_create_user_command(e.buf, "GoTagsRemove", function(args)
+        args = parse(args)
+        if args then
+          M.remove(args)
         end
       end, { nargs = "*", range = true })
 
-      vim.api.nvim_buf_create_user_command(e.buf, "GoTagsClear", function(opts)
-        opts = parse(opts)
-        if opts then
-          M.clear(opts)
+      vim.api.nvim_buf_create_user_command(e.buf, "GoTagsClear", function(args)
+        args = parse(args)
+        if args then
+          M.clear(args)
         end
       end, { nargs = "*", range = true })
     end,

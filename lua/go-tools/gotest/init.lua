@@ -5,6 +5,14 @@ local u = require("go-tools.util")
 
 local M = {}
 
+---@class gotest.Opts
+---@field show "split"|"popup"
+
+---@type gotest.Opts
+local user_opts = {
+  show = "split",
+}
+
 local ns = vim.api.nvim_create_namespace("go-tools.gotest")
 local group = vim.api.nvim_create_augroup("go-tools.gotest", { clear = true })
 
@@ -89,7 +97,7 @@ end
 
 local virt_lines = {
   {
-    ("Press '%sr' to run the test, '%ss' to show output."):format(
+    ("Press '%sr' to run this test, '%ss' to show the output."):format(
       vim.g.mapleader,
       vim.g.mapleader
     ),
@@ -213,7 +221,10 @@ function M.run_func()
   execute(name)
 end
 
-function M.setup()
+---@param opts gotest.Opts
+function M.setup(opts)
+  u.merge(user_opts, opts or {})
+
   vim.api.nvim_create_autocmd("BufEnter", {
     pattern = "*_test.go",
     group = group,

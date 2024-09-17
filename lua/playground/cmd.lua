@@ -10,7 +10,7 @@ local cmd = Command({ "gomodifytags", "-format", "json" })
 local function parse(fargs, c)
   for _, o in ipairs(fargs) do
     local k, v = unpack(vim.split(o, "="))
-    c:flag(k, v)
+    c:opt(k, v)
   end
 end
 
