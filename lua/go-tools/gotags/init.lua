@@ -44,7 +44,10 @@ local function execute(opts)
   if opts.action == "clear-tags" then
     cmd:opt(opts.action)
   else
-    cmd:opt(opts.action, u.to_csv(opts.tags))
+    cmd:opt(
+      opts.action,
+      type(opts.tags) == "table" and u.to_csv(opts.tags) or opts.tags ---@diagnostic disable-line: param-type-mismatch
+    )
   end
 
   cmd:optif("transform", opts.transform)

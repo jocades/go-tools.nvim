@@ -39,10 +39,9 @@ function M.merge(t1, t2)
   end
 end
 
----@param ls? string|string[]
----@return string
+---@param ls unknown[]
 function M.to_csv(ls)
-  return type(ls) == "table" and table.concat(ls, ",") or ls or "" ---@diagnostic disable-line: return-type-mismatch
+  return table.concat(ls, ",")
 end
 
 M.log = require("go-tools.log")("go-tools")

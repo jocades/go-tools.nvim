@@ -6,11 +6,11 @@ local u = require("go-tools.util")
 local M = {}
 
 ---@class gotest.Opts
----@field show "split"|"popup"
+---@field split? "top"|"bottom"|"left"|"right"
 
 ---@type gotest.Opts
 local user_opts = {
-  show = "split",
+  split = "bottom",
 }
 
 local ns = vim.api.nvim_create_namespace("go-tools.gotest")
@@ -21,20 +21,21 @@ local function is_go_test(path)
   return path:match("_test.go$")
 end
 
----@type gotest.Session
-local session
-local function start_session()
-  local path = vim.api.nvim_buf_get_name(0)
-  if not is_go_test(path) then
-    return
+---@type gotest.View
+local view
+---@type gotest.Popup
+local popup
+
+local function start()
+  if not view then
+    view = TestView()
   end
-  if not session then
-    ---@class gotest.Session
-    session = {
-      view = TestView(),
-    }
+  if not popup then
+    popup = require("go-tools.gotest.popup")()
+    popup:on("WinLeave", function()
+      popup:hide()
+    end)
   end
-  return vim.api.nvim_get_current_buf(), path
 end
 
 ---@param entry gotest.Entry
@@ -50,10 +51,16 @@ local function add_test(s, entry)
     s.pkg = entry.Package
   end
 
+  local node = q.get_test_func_node(entry.Test, s.buf)
+  assert(node, "Cannot find test node " .. vim.inspect(entry))
+  local ln, col = node:range()
+
   ---@class gotest.Test
   s.tests[make_key(entry)] = {
     pkg = entry.Package,
-    line = q.get_test_line(entry.Test, s.buf),
+    name = entry.Test,
+    line = ln + 1,
+    col = col + 1,
     output = {},
     success = false,
   }
@@ -105,12 +112,47 @@ local virt_lines = {
   },
 }
 
----@param name? string
-local function execute(name)
-  local buf, path = start_session()
-  if not buf then
+---@param test gotest.Test
+---@param show fun(): nil
+local function show_func_output(test, show)
+  popup.border:set_text("top", ("[%s]"):format(test.name:sub(5)), "center")
+
+  local width = 40
+  for _, line in ipairs(test.output) do
+    width = math.max(width, #line)
+  end
+  popup:set_size({ width = width + 2, height = #test.output + 2 })
+
+  popup:map("n", "s", function()
+    popup:hide()
+    show()
+  end)
+
+  if not popup.bufnr then
+    popup:map("n", "q", function()
+      popup:hide()
+    end)
+  end
+
+  popup:set_lines(test.output)
+end
+
+---@class gotest.execute.Opts
+---@field buf? number
+---@field name? string
+---@field split? string
+
+---@param opts? gotest.execute.Opts
+local function execute(opts)
+  opts = opts or {}
+  local buf = opts.buf or vim.api.nvim_get_current_buf()
+  local path = vim.api.nvim_buf_get_name(buf)
+  if not is_go_test(path) then
+    log.warn("Not a test file: " .. path)
     return
   end
+
+  start()
 
   ---@class gotest.State
   local state = {
@@ -122,8 +164,17 @@ local function execute(name)
     tests = {},
   }
 
+  local function show()
+    view:update_layout({
+      position = opts.split or user_opts.split,
+      relative = "win",
+      size = "25%",
+    })
+    view:set_lines(state.output)
+  end
+
   vim.api.nvim_buf_create_user_command(buf, "GoTestShow", function()
-    session.view:set(state.output)
+    show()
   end, {})
 
   vim.api.nvim_buf_create_user_command(buf, "GoTestShowFunc", function()
@@ -131,7 +182,7 @@ local function execute(name)
     local key = ("%s/%s"):format(state.pkg, func)
     local test = state.tests[key]
     if test then
-      session.view:set(test.output)
+      show_func_output(test, show)
     end
   end, {})
 
@@ -143,13 +194,20 @@ local function execute(name)
     "n",
     "<leader>s",
     vim.cmd.GoTestShowFunc,
+    { buffer = buf, desc = "Show test func output", nowait = true }
+  )
+
+  vim.keymap.set(
+    "n",
+    "<leader>S",
+    vim.cmd.GoTestShow,
     { buffer = buf, desc = "Show test output", nowait = true }
   )
 
   local cmd = { "go", "test", "-json" }
-  if name then
+  if opts.name then
     table.insert(cmd, "-run")
-    table.insert(cmd, name)
+    table.insert(cmd, opts.name)
   end
   table.insert(cmd, path)
 
@@ -201,24 +259,28 @@ local function execute(name)
   if vim.env.DEBUG == "go-test" then
     vim.api.nvim_buf_create_user_command(buf, "GoTestDebug", function()
       u.title("go_test dbg")
-      u.ins(session.view.bufnr)
+      u.ins(view.bufnr)
       u.ins(state)
     end, {})
   end
 end
 
-function M.run()
-  execute()
+---@param opts? gotest.execute.Opts
+function M.run(opts)
+  execute(opts)
 end
 
-function M.run_func()
+---@param opts? gotest.execute.Opts
+function M.run_func(opts)
+  if opts and opts.name then
+    return execute(opts)
+  end
   local name = q.get_test_func_name_at_cursor()
   if not name then
     log.warn("No 'TestFunc' found at cursor.")
     return
   end
-
-  execute(name)
+  execute(u.extend(opts or {}, { name = name }))
 end
 
 ---@param opts gotest.Opts
@@ -229,13 +291,20 @@ function M.setup(opts)
     pattern = "*_test.go",
     group = group,
     callback = function(e)
-      vim.api.nvim_buf_create_user_command(e.buf, "GoTest", function()
+      vim.api.nvim_buf_create_user_command(e.buf, "GoTest", function(args)
         M.run()
-      end, {})
+      end, { nargs = "*" })
 
       vim.api.nvim_buf_create_user_command(e.buf, "GoTestFunc", function()
         M.run_func()
       end, {})
+
+      vim.keymap.set(
+        "n",
+        "<leader>gt",
+        vim.cmd.GoTestFunc,
+        { buffer = e.buf, desc = "Run test at cursor" }
+      )
 
       local id
       vim.api.nvim_buf_create_user_command(e.buf, "GoTestOnSave", function(args)

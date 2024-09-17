@@ -86,14 +86,13 @@ end
 
 ---@param name string
 ---@param buf? number
-function M.get_test_line(name, buf)
+function M.get_test_func_node(name, buf)
   local capture = ('#eq? @_func_name "%s"'):format(name)
   local query_str = go_test_func_query_str:format(capture)
   local node = M.get_node(query_str, "_func_name", buf)
-  if not node then
-    return
+  if node then
+    return node
   end
-  return node:range() + 1
 end
 
 function M.get_test_func_node_at_cursor()
